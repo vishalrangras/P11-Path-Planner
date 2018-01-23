@@ -164,67 +164,6 @@ vector<double> getXY(double s, double d, const vector<double> &maps_s, const vec
 
 }
 
-//Code from repos
-
-int getLaneFromFrenet(double d) {
-  return int(floor(d / 4)); // Lane width = 4
-}
-
-double getLaneCenterFromFrenet(int lane) {
-  return double(lane*4 + 4/2);
-}
-
-double getNormalizedSpeed(double x) {
-  return 2.0f / (1.0f + exp(-x)) - 1.0f;
-}
-
-// Get ID's of cars in a given lane
-vector<int> getCarsOfLane(int lane, json sensor_fusion) {
-  vector<int> car_ids;
-
-  for (int i = 0; i < sensor_fusion.size(); ++i) {
-    float d_value = sensor_fusion[i][6];
-    int lane_value = getLaneFromFrenet(d_value);
-
-    // Check for unbounded data
-    if (lane_value < 0 || lane_value > 2) {
-      continue;
-    }
-    // Collect vehicles in ego's lane
-    if (lane_value == lane) {
-      car_ids.push_back(i);
-    }
-  }
-  return car_ids;
-}
-
-double getClosestDistance(double check_dist,
-                      double car_s, vector<int> car_ids,
-                      json sensor_fusion) {
-					  
-  double closest_dist = 100000;
-
-  for (int car_id : car_ids) {
-    double vx = sensor_fusion[car_id][3];
-    double vy = sensor_fusion[car_id][4];
-    double check_speed = sqrt(vx*vx + vy*vy);
-    double check_start_car_s = sensor_fusion[car_id][5];
-    double check_end_car_s = check_start_car_s + check_dist * check_speed;
-
-    double dist_start = fabs(check_start_car_s - car_s);
-    if (dist_start < closest_dist) {
-      closest_dist = dist_start;
-    }
-
-    double dist_end = fabs(check_end_car_s - car_s);
-    if (dist_end < closest_dist) {
-      closest_dist = dist_end;
-    }
-  }
-  return closest_dist;
-}
-
-
 int main() {
   uWS::Hub h;
 
@@ -263,13 +202,13 @@ int main() {
   } 
   
   // Start in lane 1
-  int lane = 1;
+  int my_lane = 1;
   // Have a reference velocity to target
   double ref_vel = 0;           // mph
   //double max_vel = 49.5;          // mph
   
 
-  h.onMessage([&ref_vel, &map_waypoints_x,&map_waypoints_y,&map_waypoints_s,&map_waypoints_dx,&map_waypoints_dy, &lane](uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length, uWS::OpCode opCode) {
+  h.onMessage([&ref_vel, &map_waypoints_x,&map_waypoints_y,&map_waypoints_s,&map_waypoints_dx,&map_waypoints_dy, &my_lane](uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length, uWS::OpCode opCode) {
     // "42" at the start of the message means there's a websocket message event.
     // The 4 signifies a websocket message
     // The 2 signifies a websocket event
@@ -315,91 +254,97 @@ int main() {
 			// Analysis of other cars' position
 			bool car_ahead = false;
 			bool car_left = false;
-			bool car_right = false;
+			bool car_right = false; 
 			
-			 // Speeds in each Lanes
-			 //vector<double> lane_speeds = {0.0, 0.0, 0.0};
-			 //vector<int> lane_count     = {0, 0, 0};
-			 
-			 // Collect data from all Lanes
-			 /*for (int i = 0; i < sensor_fusion.size(); ++i) {
-				float d_value = sensor_fusion[i][6];
-				int lane_value = getLaneFromFrenet(d_value);
-
-				// Check for unbounded data
-				if (lane_value < 0 || lane_value > 2) {
-					continue;
-				} // Got lane 0 or 1 or 2
-				else if (lane_value >= 0 && lane_value <= 2) {
-					double vx = sensor_fusion[i][3];
-					double vy = sensor_fusion[i][4];
-					double check_speed = sqrt(vx*vx + vy*vy);
-					double check_car_s = sensor_fusion[i][5];
-					
-					// Convert to mph
-					//lane_speeds[lane_value] += check_speed * 2.24;
-					//lane_count[lane_value] += 1;
-				}
-			 }*/
-			 
-			 
-			
+			// Using sensor fusion data to get information about other vehicles on all lanes of our driving direction
+			// Skipping sensor data of all lanes on opposite direction of our driving since we will never be driving on opposite road
 			for(int i = 0; i < sensor_fusion.size() ; i++)
 			{
-				//To check if a car is in my lane
+				
+				// Lateral Position of Car in D-Coordinate (Frenet Coordinate System)
 				float d = sensor_fusion[i][6];
 				
-				int lane_value = getLaneFromFrenet(d);
+				// Converting Lane Value which is in Frenet d-coordinate to a cartesian coordinate value (regular coordinates)
+				int lane_value = int(floor(d / 4));
 				
+				// Not processing data of cars which are on Lanes of opposite direction driving
 				if (lane_value < 0 || lane_value > 2) {
 					continue;
 				}
-            
-				//int car_lane = getLaneFromFrenet(end_path_d);
 				
+				// Speed of the car in X-Direction
 				double vx = sensor_fusion[i][3];
+				
+				// Speed of the car in Y-Direction
 				double vy = sensor_fusion[i][4];
+				
+				// Getting absolute speed of the car by using distance formula
 				double check_speed = sqrt(vx*vx+vy*vy);
+				
+				// Longitudinal Position of Car in S-Coordinate (Frenet Coordinate System)
 				double check_car_s = sensor_fusion[i][5];
 				check_car_s += ((double) prev_size*0.02*check_speed); //if using previous points can project s value out
 				
-				if (lane == lane_value) {
+				// To check if the car is in my lane
+				if (my_lane == lane_value) {
 					
-					// Check s values greater than mine and s gap
+					// Check s value if it is greater than mine
+					// If the s value of the car is smaller then my car, then the car is behind me and not ahead 
+					// If the s value of the car is bigger then my car, 
+					// then need to check if it is at the distance greater than 30 or not
 					if((check_car_s > car_s) && ((check_car_s-car_s) < 30))
 					{
-						// Do some logic here, lower reference velocity so we don't crash into the car in front of us, could also flag to change lane
+						// Setting the flag car_ahead to true
 						car_ahead = true;
 					}
-				}else if (lane > lane_value){
+				// If car's lane value is smaller than my lane value, then car would be on left to my car 
+				// since origin of the lane value is at the centre of the road
+				}else if (my_lane > lane_value){
+					// Checking if its safe to change the lane based on position of car ahead in the left lane
 					if(((car_s - 30) < check_car_s) && ((car_s + 30) > check_car_s))
 					{
+						// Setting the flag car_left to true
 						car_left = true;
 					}
+				// If the car lane is greater than my lane, then the car is on my right
 				}else{
+					// Checking if its safe to change the lane based on position of car ahead in the right lane
 					if(((car_s - 30) < check_car_s) && ((car_s + 30) > check_car_s))
-					{
+					{	
+						// Setting the flag car_right to true
 						car_right = true;
 					}
 				}
 			}
 			
-			// Car Behavior 
+			// Analysing if there is any car in front of us and if we need to change lane or slow down or not 
             double speed_diff = 0;
-            if ( car_ahead ) { // Car ahead
-              if ( !car_left && lane > 0 ) {
-                lane--; // Changing to left lane.
-              } else if ( !car_right && lane != 2 ){
-                lane++; // Changing to right lane.
+			// Checking if there is any car ahead
+            if ( car_ahead ) {
+			  // If there is no car on the left lane and if we are not on the left most lane, we should change to left lane
+              if ( !car_left && my_lane > 0 ) {
+                my_lane--; // Changing to left lane.
+			  // If there is no car on the right lane and if we are not on the right most lane, we should change to right lane
+              } else if ( !car_right && my_lane != 2 ){
+                my_lane++; // Changing to right lane.
+			  // If no lane changing is feasible, then we should decelerate our vehicle with the acceptable retardation of 5 m / s^2
               } else {
                 speed_diff -= 0.224;
               }
+			//If there is no car ahead of us
             } else {
-              if ( lane != 1 ) {
-                if ( ( lane == 0 && !car_right ) || ( lane == 2 && !car_left ) ) {
-                  lane = 1; // Changing lane back to center.
+			  // Checking if we are not in the centre lane
+              if ( my_lane != 1 ) {
+			    // If we are on left most lane and there is no car on our right side lane,
+				// or if we are on right most lane and there is no car on our left side lane,
+				// we should switch back to the centre lane
+                if ( ( my_lane == 0 && !car_right ) || ( my_lane == 2 && !car_left ) ) {
+                  my_lane = 1; // Changing lane back to centre.
                 }
               }
+			  // If we are on middle lane and their is no car ahead of us
+			  // and if our velocity is lesser than the speed limit of the highway,
+			  // we should accelerate
               if ( ref_vel < 49.5 ) {
                 speed_diff += 0.224;
               }
@@ -416,7 +361,7 @@ int main() {
 			double ref_y = car_y;
 			double ref_yaw = deg2rad(car_yaw);
 			
-			//if the previous size is almost empty, use the car as starting reference
+			// If the previous size is almost empty, use the car as starting reference
 			if(prev_size < 2){
 				//Use two points that make the path tangent to the car
 				double prev_car_x = car_x - cos(car_yaw);
@@ -429,6 +374,7 @@ int main() {
 				ptsy.push_back(car_y);
 				
 			}
+			// If the previous path points are not empty,
 			// use the previous path's end point as starting reference
 			else
 			{
@@ -451,9 +397,9 @@ int main() {
 			}
 			
 			// In Frenet add evenly 30m spaced points ahead of the starting reference
-			vector<double> next_wp0 = getXY(car_s+30, (2+4*lane), map_waypoints_s, map_waypoints_x, map_waypoints_y);
-			vector<double> next_wp1 = getXY(car_s+60, (2+4*lane), map_waypoints_s, map_waypoints_x, map_waypoints_y);
-			vector<double> next_wp2 = getXY(car_s+90, (2+4*lane), map_waypoints_s, map_waypoints_x, map_waypoints_y);
+			vector<double> next_wp0 = getXY(car_s+30, (2+4*my_lane), map_waypoints_s, map_waypoints_x, map_waypoints_y);
+			vector<double> next_wp1 = getXY(car_s+60, (2+4*my_lane), map_waypoints_s, map_waypoints_x, map_waypoints_y);
+			vector<double> next_wp2 = getXY(car_s+90, (2+4*my_lane), map_waypoints_s, map_waypoints_x, map_waypoints_y);
 			
 			ptsx.push_back(next_wp0[0]);
 			ptsx.push_back(next_wp1[0]);
@@ -488,9 +434,8 @@ int main() {
           	vector<double> next_y_vals;
 
 
-          	// TODO: define a path made up of (x,y) points that the car will visit sequentially every .02 seconds
-          	
-		//double dist_inc = 0.3;
+        // TODO: define a path made up of (x,y) points that the car will visit sequentially every .02 seconds  	
+        // Following code is adapted from Project Walk-through  	
 		for(int i=0; i<previous_path_x.size(); i++)
 		{
 			//double next_s = car_s+(i+1)*dist_inc;
@@ -506,16 +451,18 @@ int main() {
 		double target_x = 30.0;
 		double target_y = s(target_x);
 		double target_dist = sqrt((target_x)*(target_x)+(target_y)*(target_y));
-		
 		double x_add_on = 0;
 		
-		// Fill up the rest of our path planner after filling it with previous points, here we will always output 50 points
+		// Fill up the rest of our path planner after filling it with previous points
+		// Here we will always output 50 points
 		for(int i = 1; i <= 50 - previous_path_x.size() ; i++)
 		{
 			
 			ref_vel += speed_diff;
             if ( ref_vel > 49.5 ) {
                 ref_vel = 49.5;
+				
+			// TODO: Lets see what happens if we comment this
             } else if ( ref_vel < 0.224 ) {
                 ref_vel = 0.224;
             }
@@ -529,7 +476,7 @@ int main() {
 			double x_ref = x_point;
 			double y_ref = y_point;
 			
-			//rotate back to normal after rotating to earlier
+			//rotate back to normal
 			x_point = (x_ref*cos(ref_yaw)-y_ref*sin(ref_yaw));
 			y_point = (x_ref*sin(ref_yaw)+y_ref*cos(ref_yaw));
 			
@@ -543,7 +490,7 @@ int main() {
 		
 		// End
 
-		msgJson["next_x"] = next_x_vals;
+			msgJson["next_x"] = next_x_vals;
           	msgJson["next_y"] = next_y_vals;
 
           	auto msg = "42[\"control\","+ msgJson.dump()+"]";
