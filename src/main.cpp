@@ -164,62 +164,56 @@ vector<double> getXY(double s, double d, const vector<double> &maps_s, const vec
 
 }
 
-//Code from repos
 
-int getLaneFromFrenet(double d) {
-  return int(floor(d / 4)); // Lane width = 4
-}
-
-double getLaneCenterFromFrenet(int lane) {
-  return double(lane*4 + 4/2);
-}
-
-double getNormalizedSpeed(double x) {
-  return 2.0f / (1.0f + exp(-x)) - 1.0f;
-}
-
-// Get ID's of cars in a given lane
-vector<int> getCarsOfLane(int lane, json sensor_fusion) {
+// Collecting IDs' of the cars in a given target lane
+vector<int> getCarsOfTargetLane(int target_lane, json sensor_fusion) {
   vector<int> car_ids;
 
   for (int i = 0; i < sensor_fusion.size(); ++i) {
-    float d_value = sensor_fusion[i][6];
-    int lane_value = getLaneFromFrenet(d_value);
+    
+	float d_value = sensor_fusion[i][6];
+    int car_lane = int(floor(d_value / 4)); // Lane width = 4
 
-    // Check for unbounded data
-    if (lane_value < 0 || lane_value > 2) {
+    // Skipping the data of the cars which are on opposite direction lanes
+    if (car_lane < 0 || car_lane > 2) {
       continue;
     }
-    // Collect vehicles in ego's lane
-    if (lane_value == lane) {
+	
+    // Collecting data of the cars which are in our target lane
+    if (car_lane == target_lane) {
       car_ids.push_back(i);
     }
+	
   }
   return car_ids;
 }
 
-double getClosestDistance(double check_dist,
+// Getting the distance between my car and the closest car to me
+double getClosestDistanceFromCar(double check_dist,
                       double car_s, vector<int> car_ids,
                       json sensor_fusion) {
 					  
   double closest_dist = 100000;
 
-  for (int car_id : car_ids) {
-    double vx = sensor_fusion[car_id][3];
-    double vy = sensor_fusion[car_id][4];
+  for (int i=0; i< car_ids.size() ; i++) {
+    double vx = sensor_fusion[car_ids[i]][3];
+    double vy = sensor_fusion[car_ids[i]][4];
     double check_speed = sqrt(vx*vx + vy*vy);
-    double check_start_car_s = sensor_fusion[car_id][5];
+    double check_start_car_s = sensor_fusion[car_ids[i]][5];
     double check_end_car_s = check_start_car_s + check_dist * check_speed;
-
+	
+	// Checking for the closest car in front of me
     double dist_start = fabs(check_start_car_s - car_s);
     if (dist_start < closest_dist) {
       closest_dist = dist_start;
     }
-
+	
+	// Checking for the closest car behind me
     double dist_end = fabs(check_end_car_s - car_s);
     if (dist_end < closest_dist) {
       closest_dist = dist_end;
     }
+	
   }
   return closest_dist;
 }
@@ -312,37 +306,46 @@ int main() {
 				car_s = end_path_s;
 			}
 			
-			 // Speeds in each Lanes
+			 // Speeds in each Lane
 			 vector<double> lane_speeds = {0.0, 0.0, 0.0};
+			 
+			 // Number of cars in each Lane
 			 vector<int> lane_count     = {0, 0, 0};
 			 
-			 // Collect data from all Lanes
+			 // Analyze sensor data of each Lanes
 			 for (int i = 0; i < sensor_fusion.size(); ++i) {
+				
 				float d_value = sensor_fusion[i][6];
-				int lane_value = getLaneFromFrenet(d_value);
+				int lane_value = int(floor(d_value / 4)); // Lane width = 4
 
-				// Check for unbounded data
+				// Skipping the data of the cars which are moving in opposite direction of our driving direction
 				if (lane_value < 0 || lane_value > 2) {
 					continue;
-				} // Got lane 0 or 1 or 2
+				} 
+				// Considering the data of cars which are moving in the same direction as our driving direction
 				else if (lane_value >= 0 && lane_value <= 2) {
 					double vx = sensor_fusion[i][3];
 					double vy = sensor_fusion[i][4];
 					double check_speed = sqrt(vx*vx + vy*vy);
-					// Convert to mph
+					
+					// Adding the speed of the cars for a particular lane
 					lane_speeds[lane_value] += check_speed * 2.24;
+					
+					// Incrementing the vehicle count for a particular lane
 					lane_count[lane_value] += 1;
 				}
 			 }
 			 
-			 // Averaging speed data for each lane
+			 // Averaging speed data of each lane
 			 for (int i = 0; i < lane_speeds.size(); ++i) {
-				int num_vehicles = lane_count[i];         // Num of vehicles in the i-th lane
-				// If no vehicles in the lane - we could drive with max allowed speed there
+				int num_vehicles = lane_count[i];         // Number of vehicles in the given lane
+				
+				// If there are no vehicles in this lane, we can drive at the speed limit of the road
+				// hence, we can set the lane speed as the maximum permissable limit
 				if (num_vehicles == 0) {
 					lane_speeds[i] = 49.5;
 				}
-				// Else - average the speed in the lane
+				// If there are vehicles in this lane, we need to calculate average speed of this lane
 				else {
 					lane_speeds[i] = lane_speeds[i] / num_vehicles;
 				}
@@ -380,18 +383,22 @@ int main() {
 			}
 			*/
 			
+			// Analyzing sensor data to see if any vehicle in front of us as getting too close to us
+			// Setting too_close flag in the below code prevents us from collision with the front car
+			// The following code block activates the cost calculation and lane change action if vehicle is too close
 			for(int i = 0; i < sensor_fusion.size() ; i++)
 			{
-				//To check if a car is in my lane
+				// To check if there is a car in my lane
 				float d = sensor_fusion[i][6];
 				
-				int lane_value = getLaneFromFrenet(d);
+				int lane_value = int(floor(d / 4)); // Lane width = 4
 				
+				// Skipping data of the cars driving in opposite direction
 				if (lane_value < 0 || lane_value > 2) {
 					continue;
 				}
             
-				int car_lane = getLaneFromFrenet(end_path_d);
+				int car_lane = int(floor(end_path_d / 4)); // Lane width = 4
 				
 				if (lane == lane_value) {
 					double vx = sensor_fusion[i][3];
@@ -399,11 +406,11 @@ int main() {
 					double check_speed = sqrt(vx*vx+vy*vy);
 					double check_car_s = sensor_fusion[i][5];
 					
-					check_car_s += ((double) prev_size*0.02*check_speed); //if using previous points can project s value out
-					//check s values greater than mine and s gap
+					check_car_s += ((double) prev_size*0.02*check_speed); // If using previous points can project s value out
+					// Checking if s values is greater than mine and lesser than allowed gap between two cars
 					if((check_car_s > car_s) && ((check_car_s-car_s) < 30))
 					{
-						// Do some logic here, lower reference velocity so we dont crash into the car in front of us, could also flag to change lane
+						// Do some logic here, lower reference velocity so we don't crash into the car in front of us, could also flag to change lane
 						//ref_vel = 29.5; // mph
 						too_close = true;
 						closest_veh_speed = check_speed;
@@ -411,57 +418,73 @@ int main() {
 				}
 			}
 			
+			// Following code block executes a corrective action if there is a car too close to us in front of our car
 			if(too_close)
-			{
+			{	
+				// Decelerating the car right away in order to prevent collision
+				ref_vel -= 0.224;
+				
+				// Deciding which will be possible lanes for us to change to based on our current lane
+				// This code block below serves like Finite State Machine
 				vector<int> possible_lanes;
-				if (lane == 0) {                // If Left Lane
-					possible_lanes = {0, 1};		// Keep Left Lane or Change to Right Lane
+				// If we are in left most lane
+				// We can either stay in the left lane or Change to the middle Lane
+				if (lane == 0) {                
+					possible_lanes = {0, 1};
 				}
-				else if (lane == 1) {           // If Middle Lane
-					possible_lanes = {0, 1, 2};		// Keep Middle Lane, Change to Left Lane or Change to Right Lane
+				// If we are in the middle lane
+				// We can either stay in the middle lane or change to the left or right lane
+				else if (lane == 1) {         
+					possible_lanes = {0, 1, 2};
 				}
-				else {                          // If Right Lane
-					possible_lanes = {1, 2};		// Keep Right lane or Change to Left Lane
+				// If we are in the right most lane
+				// We can either stay in the right lane or change to the middle lane
+				else {                          
+					possible_lanes = {1, 2};	
 				}
 				
+				// Initializing the best lane as the current lane itself initially
 				int best_lane    = lane;
 				double best_cost = numeric_limits<double>::max();
 			
 				// Check all available lane cases
-				// Analyse cost for each lane and decide what to do
+				// Analyse cost for each lane and decide which lane to pick based on the lowest cost
 				for (int i=0;i<possible_lanes.size();i++ ) {
+					
+					// Decelerating vehicle because if the calculation takes longer, the vehicles collide to the front vehicle
+					ref_vel -= 0.224;
+					
+					// Initializing cost to zero
 					double cost = 0;
 
-					// Evaluating Lane Cost
-					// If lane is not current lane
+					
+					// A cost is added if we need to change the lane
 					if (possible_lanes[i] != lane) {
-						cost += 1000;
+						cost += 50000;
 					}
 
-					// Evaluate Speed Cost
+					// Adding cost based on our current speed compared with the intended lane's average speed
 					double avg_speed = lane_speeds[possible_lanes[i]];
-					cost += getNormalizedSpeed(2.0 * (avg_speed - ref_vel/avg_speed)) * 1000;
+					cost += 2.0 * (avg_speed - ref_vel/avg_speed) * 1000;
 
-					// Evaluate Collision cost
-					// Evaluate Inside 15m gap cost
+					// If the closest vehicle to our vehicle in a given lane is at a distance lesser than the permissible safe distance,
+					// a high cost is added in order to prevent collision
 					double gap = 15;
-					vector<int> car_ids = getCarsOfLane(possible_lanes[i], sensor_fusion);
-					double closest_dist = getClosestDistance(0.02*prev_size, car_s, car_ids, sensor_fusion);
-
+					vector<int> car_ids = getCarsOfTargetLane(possible_lanes[i], sensor_fusion);
+					double closest_dist = getClosestDistanceFromCar(0.02*prev_size, car_s, car_ids, sensor_fusion);
 					if (closest_dist < gap) {
 						cost += 100000;
 					}
-
-					cost += getNormalizedSpeed(2 * gap/closest_dist) * 1000;
-
+					cost += (2 * gap/closest_dist) * 1000;
+					
+					// Comparing costs of various lanes and picking the best lane
 					if (cost < best_cost) {
 						best_lane = possible_lanes[i];
 						best_cost = cost;
 					}
 					
-					cout << "COST |" << cost
-						<< "|\t BEST_COST |" << best_cost
-						<< "|\t LANE |" << possible_lanes[i] << "|" << endl;
+					cout << "LANE " << possible_lanes[i]
+							<< "\t COST = " << cost << endl;
 				}
 				
 				// If ego is close to the car and moves faster than the average lane speed
@@ -470,11 +493,14 @@ int main() {
 				}
 
 				// Change lane
-				cout << "Change the line from |" << lane << "| to |" << best_lane << "| " << endl;
+				cout << "BEST_COST = " << best_cost << endl;
+				cout << "Change the line from lane:" << lane << " to lane:" << best_lane << endl;
 				cout << "-------------------------------------------------" << endl;
 				lane = best_lane;
 			
 			}
+			// If there is no vehicle too close to our vehicle and our velocity is lesser than the allowed maximum velocity
+			// we should accelerate our vehicle
 			else if(ref_vel < 49.5)
 			{
 				ref_vel += .244;
@@ -482,12 +508,11 @@ int main() {
 			
 			//Create a list of widely spaced (x,y) waypoints, evenly spaced at 30 m.
 			//Later we will interpolate these waypoints with a spline and fill it in with more points that control speed.
-			
 			vector<double> ptsx;
 			vector<double> ptsy;
 			
-			// reference x, y, yaw states
-			// either we will reference the starting point as where the car is or at the previous paths end point
+			// Reference x, y, yaw states
+			// Either we will reference the starting point as where the car is or at the previous paths end point
 			
 			double ref_x = car_x;
 			double ref_y = car_y;
@@ -566,9 +591,9 @@ int main() {
           	vector<double> next_y_vals;
 
 
-          	// TODO: define a path made up of (x,y) points that the car will visit sequentially every .02 seconds
+        // TODO: define a path made up of (x,y) points that the car will visit sequentially every .02 seconds
           	
-		double dist_inc = 0.3;
+		//double dist_inc = 0.3;
 		for(int i=0; i<previous_path_x.size(); i++)
 		{
 			//double next_s = car_s+(i+1)*dist_inc;
@@ -588,7 +613,6 @@ int main() {
 		double x_add_on = 0;
 		
 		// Fill up the rest of our path planner after filling it with previous points, here we will always output 50 points
-		
 		for(int i = 1; i <= 50 - previous_path_x.size() ; i++)
 		{
 			
