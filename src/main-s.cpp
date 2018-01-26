@@ -295,6 +295,7 @@ int main() {
 					if((check_car_s > car_s) && ((check_car_s-car_s) < 30))
 					{
 						// Setting the flag car_ahead to true
+						//std::cout << "Setting Car Ahead to true" << std::endl;
 						car_ahead = true;
 					}
 				// If car's lane value is smaller than my lane value, then car would be on left to my car 
@@ -304,6 +305,7 @@ int main() {
 					if(((car_s - 30) < check_car_s) && ((car_s + 30) > check_car_s))
 					{
 						// Setting the flag car_left to true
+						//std::cout << "Setting car on left to true" << std::endl;
 						car_left = true;
 					}
 				// If the car lane is greater than my lane, then the car is on my right
@@ -312,6 +314,7 @@ int main() {
 					if(((car_s - 30) < check_car_s) && ((car_s + 30) > check_car_s))
 					{	
 						// Setting the flag car_right to true
+						//std::cout << "Setting car on right to true" << std::endl;
 						car_right = true;
 					}
 				}
@@ -323,18 +326,22 @@ int main() {
             if ( car_ahead ) {
 			  // If there is no car on the left lane and if we are not on the left most lane, we should change to left lane
               if ( !car_left && my_lane > 0 ) {
+				//std::cout << "Changing to left lane" << std::endl;
                 my_lane--; // Changing to left lane.
 			  // If there is no car on the right lane and if we are not on the right most lane, we should change to right lane
               } else if ( !car_right && my_lane != 2 ){
+			  //std::cout << "Changing to right lane" << std::endl;
                 my_lane++; // Changing to right lane.
-			  // If no lane changing is feasible, then we should decelerate our vehicle with the acceptable retardation of 5 m / s^2
+			  // If no lane changing is feasible, then we should decelerate our vehicle with the acceptable retardation
               } else {
+			  //std::cout << "Decelerating the car and not changing the lane" << std::endl;
                 speed_diff -= 0.224;
               }
 			//If there is no car ahead of us
             } else {
 			  // Checking if we are not in the centre lane
-              if ( my_lane != 1 ) {
+              
+			  if ( my_lane != 1 ) {
 			    // If we are on left most lane and there is no car on our right side lane,
 				// or if we are on right most lane and there is no car on our left side lane,
 				// we should switch back to the centre lane
@@ -346,6 +353,7 @@ int main() {
 			  // and if our velocity is lesser than the speed limit of the highway,
 			  // we should accelerate
               if ( ref_vel < 49.5 ) {
+			    //std::cout << "Accelerating the car, no lane change required" << std::endl;
                 speed_diff += 0.224;
               }
             }
