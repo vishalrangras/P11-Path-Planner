@@ -429,23 +429,23 @@ int main() {
 			
 				// Check all available lane cases
 				// Analyse cost for each lane and decide what to do
-				for (int lane_case : possible_lanes) {
+				for (int i=0;i<possible_lanes.size();i++ ) {
 					double cost = 0;
 
 					// Evaluating Lane Cost
 					// If lane is not current lane
-					if (lane_case != lane) {
+					if (possible_lanes[i] != lane) {
 						cost += 1000;
 					}
 
 					// Evaluate Speed Cost
-					double avg_speed = lane_speeds[lane_case];
+					double avg_speed = lane_speeds[possible_lanes[i]];
 					cost += getNormalizedSpeed(2.0 * (avg_speed - ref_vel/avg_speed)) * 1000;
 
 					// Evaluate Collision cost
 					// Evaluate Inside 15m gap cost
 					double gap = 15;
-					vector<int> car_ids = getCarsOfLane(lane_case, sensor_fusion);
+					vector<int> car_ids = getCarsOfLane(possible_lanes[i], sensor_fusion);
 					double closest_dist = getClosestDistance(0.02*prev_size, car_s, car_ids, sensor_fusion);
 
 					if (closest_dist < gap) {
@@ -455,18 +455,18 @@ int main() {
 					cost += getNormalizedSpeed(2 * gap/closest_dist) * 1000;
 
 					if (cost < best_cost) {
-						best_lane = lane_case;
+						best_lane = possible_lanes[i];
 						best_cost = cost;
 					}
 					
 					cout << "COST |" << cost
 						<< "|\t BEST_COST |" << best_cost
-						<< "|\t LANE |" << lane_case << "|" << endl;
+						<< "|\t LANE |" << possible_lanes[i] << "|" << endl;
 				}
 				
 				// If ego is close to the car and moves faster than the average lane speed
 				if (best_lane == lane && (ref_vel > lane_speeds[lane] || ref_vel > closest_veh_speed)) {
-					ref_vel -= 0.224;         // -= ~5m/s*s
+					ref_vel -= 0.224;         // Decelerate at the rate of 5 m/s^2
 				}
 
 				// Change lane
