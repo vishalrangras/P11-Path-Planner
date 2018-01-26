@@ -460,7 +460,7 @@ int main() {
 					
 					// A cost is added if we need to change the lane
 					if (possible_lanes[i] != lane) {
-						cost += 50000;
+						cost += 100000;
 					}
 
 					// Adding cost based on our current speed compared with the intended lane's average speed
